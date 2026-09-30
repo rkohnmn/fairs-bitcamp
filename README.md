@@ -6,7 +6,7 @@
 
 **A neuroscience-inspired search engine that retrieves media by _how it feels_, not just what it's about.**
 
-Built at [Bitcamp](https://bit.camp/) 2025 · University of Maryland
+Built at [Bitcamp](https://bit.camp/) 2026 · University of Maryland
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776ab?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
