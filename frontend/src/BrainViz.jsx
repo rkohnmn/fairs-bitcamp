@@ -188,6 +188,8 @@ export default function BrainViz({ className = '', activations = null, threshold
     rimLight.position.set(10, 120, -60)
     scene.add(rimLight)
 
+    let animId
+
     const meshUrl = `${import.meta.env.BASE_URL || '/'}brain_mesh.json`.replace('//', '/')
     fetch(meshUrl)
       .then((r) => r.json())
