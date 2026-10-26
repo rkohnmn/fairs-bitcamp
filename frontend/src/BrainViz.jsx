@@ -7,7 +7,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 // immediately, then ramps aggressively to strong orange by the midpoint and
 // finishes in saturated red for the hottest regions.
 function hotColor(t) {
-  const x = t < 0 ? 0 : t > 1 ? 1 : t
+  const x = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0
   let r, g, b
   if (x < 0.18) {
     // immediate baseline break: strong lemon yellow right away
@@ -32,25 +32,29 @@ function hotColor(t) {
 }
 
 function paintColors(nVerts, sulc, activations, threshold) {
+  const safeThreshold = Math.min(0.99, Math.max(0.01, Number(threshold) || 0.35))
   const colors = new Float32Array(nVerts * 3)
+  const isActArray = activations && (Array.isArray(activations) || ArrayBuffer.isView(activations))
+
   for (let i = 0; i < nVerts; i++) {
-    // Warm bone/ivory anatomical base — the brain's "blank state" is bright.
-    // Sulcal folds add subtle variation so anatomy stays readable.
-    const t = sulc ? sulc[i] : 0.6
+    // Warm bone/ivory anatomical base
+    const rawT = sulc ? sulc[i] : 0.6
+    const t = Number.isFinite(rawT) ? rawT : 0.6
     const baseR = 0.82 + t * (0.96 - 0.82)
     const baseG = 0.78 + t * (0.93 - 0.78)
     const baseB = 0.74 + t * (0.88 - 0.74)
 
-    const a = activations ? activations[i] : 0
+    const rawA = isActArray ? activations[i] : 0
+    const a = Number.isFinite(rawA) ? rawA : 0
 
-    if (!activations || a <= threshold) {
+    if (!isActArray || a <= safeThreshold) {
       colors[i * 3] = baseR
       colors[i * 3 + 1] = baseG
       colors[i * 3 + 2] = baseB
       continue
     }
 
-    const remapped = (a - threshold) / (1 - threshold)
+    const remapped = Math.max(0, Math.min(1, (a - safeThreshold) / (1 - safeThreshold)))
     const [hr, hg, hb] = hotColor(remapped)
     // Push the overlay in earlier so weak stimulation is clearly visible.
     const weight = 0.48 + 0.52 * Math.pow(remapped, 0.7)
@@ -142,27 +146,45 @@ export default function BrainViz({ className = '', activations = null, threshold
   regionsRef.current = regions
   thresholdRef.current = threshold
 
+  const [webGlError, setWebGlError] = useState(false)
   const [hoverInfo, setHoverInfo] = useState(null) // { region, vertexIndex, pointActivation, visualStrength, x, y }
 
   useEffect(() => {
     const mount = mountRef.current
     if (!mount) return
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    let isCancelled = false
+    let renderer
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'default' })
+    } catch (e) {
+      console.warn('WebGL initialization failed, using 2D fail-safe:', e)
+      setWebGlError(true)
+      return
+    }
+
+    const initW = Math.max(mount.clientWidth || 400, 100)
+    const initH = Math.max(mount.clientHeight || 400, 100)
+
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.15
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.setClearColor(0x000000, 0)
-    renderer.setSize(mount.clientWidth, mount.clientHeight)
+    renderer.setSize(initW, initH)
     mount.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
     const scene = new THREE.Scene()
-    const pmrem = new THREE.PMREMGenerator(renderer)
-    scene.environment = pmrem.fromScene(new RoomEnvironment()).texture
+    try {
+      const pmrem = new THREE.PMREMGenerator(renderer)
+      scene.environment = pmrem.fromScene(new RoomEnvironment()).texture
+      pmrem.dispose()
+    } catch (e) {
+      scene.add(new THREE.AmbientLight(0xffffff, 1.2))
+    }
 
-    const camera = new THREE.PerspectiveCamera(40, mount.clientWidth / mount.clientHeight, 0.1, 1500)
+    const camera = new THREE.PerspectiveCamera(40, initW / initH, 0.1, 1500)
     camera.position.set(0, -200, 60)
     cameraRef.current = camera
 
@@ -194,6 +216,7 @@ export default function BrainViz({ className = '', activations = null, threshold
     fetch(meshUrl)
       .then((r) => r.json())
       .then((data) => {
+        if (isCancelled) return
         const geo = new THREE.BufferGeometry()
         geo.setAttribute('position', new THREE.Float32BufferAttribute(data.vertices, 3))
         geo.setIndex(new THREE.Uint32BufferAttribute(data.faces, 1))
@@ -222,6 +245,7 @@ export default function BrainViz({ className = '', activations = null, threshold
         meshRef.current = mesh
       })
       .catch(() => {
+        if (isCancelled) return
         const geo = new THREE.SphereGeometry(60, 32, 32)
         const mat = new THREE.MeshStandardMaterial({ color: 0xd7c29c, roughness: 0.7 })
         const mesh = new THREE.Mesh(geo, mat)
@@ -350,30 +374,39 @@ export default function BrainViz({ className = '', activations = null, threshold
     renderer.domElement.style.cursor = 'grab'
 
     const ro = new ResizeObserver(() => {
-      const w = mount.clientWidth
-      const h = mount.clientHeight
-      renderer.setSize(w, h, false)
-      camera.aspect = w / h
-      camera.updateProjectionMatrix()
+      if (!mount) return
+      const w = Math.max(mount.clientWidth || 400, 10)
+      const h = Math.max(mount.clientHeight || 400, 10)
+      renderer?.setSize(w, h, false)
+      if (camera) {
+        camera.aspect = w / h
+        camera.updateProjectionMatrix()
+      }
     })
     ro.observe(mount)
 
     function loop() {
+      if (isCancelled) return
       animId = requestAnimationFrame(loop)
-      controls.update()
-      renderer.render(scene, camera)
+      controls?.update()
+      if (renderer && scene && camera) {
+        renderer.render(scene, camera)
+      }
     }
     loop()
 
     return () => {
-      cancelAnimationFrame(animId)
+      isCancelled = true
+      if (animId) cancelAnimationFrame(animId)
       ro.disconnect()
-      renderer.domElement.removeEventListener('pointermove', onPointerMove)
-      renderer.domElement.removeEventListener('pointerleave', onPointerLeave)
-      renderer.domElement.removeEventListener('click', onClick)
-      controls.dispose()
-      renderer.dispose()
-      if (mount.contains(renderer.domElement)) {
+      if (renderer?.domElement) {
+        renderer.domElement.removeEventListener('pointermove', onPointerMove)
+        renderer.domElement.removeEventListener('pointerleave', onPointerLeave)
+        renderer.domElement.removeEventListener('click', onClick)
+      }
+      controls?.dispose()
+      renderer?.dispose()
+      if (mount && renderer?.domElement && mount.contains(renderer.domElement)) {
         mount.removeChild(renderer.domElement)
       }
       meshRef.current = null
@@ -419,6 +452,26 @@ export default function BrainViz({ className = '', activations = null, threshold
       top: placeAbove ? undefined : hoverInfo.y + 16,
       bottom: placeAbove ? (h - hoverInfo.y) + 16 : undefined,
     }
+  }
+
+  if (webGlError) {
+    return (
+      <div className={`${className} flex flex-col items-center justify-center p-6 bg-[#0f0f0f] border border-white/10 rounded text-center`}>
+        <div className="w-12 h-12 rounded-full bg-[#d7c29c]/10 border border-[#d7c29c]/20 flex items-center justify-center mb-3">
+          <span className="text-xl">🧠</span>
+        </div>
+        <h4 className="text-xs uppercase tracking-widest text-[#d7c29c] font-bold mb-2">Cortical Activation Map</h4>
+        <p className="text-[11px] text-[#a09a92] max-w-xs mb-3">WebGL hardware acceleration is restricted. Displaying canonical network activation matrix:</p>
+        <div className="grid grid-cols-2 gap-2 max-w-sm w-full text-left">
+          {HARDCODED_REGIONS.map((r) => (
+            <div key={r.name} className="p-2.5 bg-black/40 border border-white/5 rounded text-[10px]">
+              <div className="font-semibold text-white">{r.name}</div>
+              <div className="text-[#a09a92] text-[9px] mt-0.5">{REGION_DETAILS[r.name] || 'Cortical Network'}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
