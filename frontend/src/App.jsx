@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { Brain, Upload, Square, Video, Music, Settings, History, Plus, X, ExternalLink } from 'lucide-react'
 import BrainViz from './BrainViz'
+import { MOCK_PARCELLATION, MOCK_QUERY_RESULT, MOCK_EXPLANATIONS, generateMockActivations } from './mockData'
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 
@@ -12,12 +13,37 @@ function joinUrl(base, path) {
 }
 
 async function fetchJson(path, init) {
-  const response = await fetch(joinUrl(apiBase, path), init)
-  if (!response.ok) {
-    const detail = await response.text()
-    throw new Error(detail || `Request failed: ${response.status}`)
+  try {
+    const response = await fetch(joinUrl(apiBase, path), init)
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`)
+    }
+    return await response.json()
+  } catch (error) {
+    // Client-side fallback for GitHub Pages demo mode
+    if (path === '/brain/parcellation') {
+      return MOCK_PARCELLATION
+    }
+    if (path === '/query') {
+      return MOCK_QUERY_RESULT
+    }
+    if (path === '/explain') {
+      let resultId = 'res-nocturne-solitude'
+      try {
+        if (init?.body) {
+          const parsed = JSON.parse(init.body)
+          if (parsed.result_id) resultId = parsed.result_id
+        }
+      } catch (_) {}
+      return MOCK_EXPLANATIONS[resultId] || MOCK_EXPLANATIONS['res-nocturne-solitude']
+    }
+    const activationMatch = path.match(/^\/items\/(.+)\/activation$/)
+    if (activationMatch) {
+      const itemId = decodeURIComponent(activationMatch[1])
+      return { activations_normalized: Array.from(generateMockActivations(itemId)) }
+    }
+    throw error
   }
-  return response.json()
 }
 
 function corpusUrl(filePath) {
@@ -116,19 +142,20 @@ export default function CortexCommons() {
       activationsCacheRef.current[itemId] = arr
       return arr
     } catch (error) {
-      // No raw neural available for this item — keep anatomy-only rendering
-      activationsCacheRef.current[itemId] = null
-      return null
+      const fallback = Array.from(generateMockActivations(itemId))
+      activationsCacheRef.current[itemId] = fallback
+      return fallback
     }
   }
 
   const fetchExplanationForResult = async (resultRow) => {
+    const currentAnchorId = queryResult?.input_a_item?.id || 'anchor-melancholy'
     const [payload, activations] = await Promise.all([
       fetchJson('/explain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          input_a_id: activeScenario.input_a_id,
+          input_a_id: currentAnchorId,
           result_id: resultRow.item.id,
           include_vertex_data: false,
         }),
@@ -227,13 +254,35 @@ export default function CortexCommons() {
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="hover:bg-white/5 p-2 rounded transition-colors flex items-center justify-center border border-transparent hover:border-white/10"
+              title="Toggle Menu"
             >
-              <img src="/Fairs.png" alt="Fairs Logo" className="w-9 h-9 object-contain rounded-sm mix-blend-screen" />
+              <img
+                src={`${import.meta.env.BASE_URL || '/'}Fairs.png`.replace('//', '/')}
+                alt="Fairs Logo"
+                className="w-9 h-9 object-contain rounded-sm mix-blend-screen"
+              />
             </button>
             <div className="flex flex-col">
               <span className="font-bold tracking-[0.15em] text-lg uppercase leading-none">FAIRS</span>
-              <span className="text-[10px] text-[#a09a92] tracking-widest mt-1 uppercase opacity-60">Neural Commons</span>
+              <span className="text-[10px] text-[#a09a92] tracking-widest mt-1 uppercase opacity-60">Neural Commons · Bitcamp 2026</span>
             </div>
+          </div>
+          <div className="flex items-center space-x-3 sm:space-x-4">
+            <a
+              href="https://rkohnmn.github.io/"
+              className="hidden sm:inline-flex items-center text-xs text-[#a09a92] hover:text-[#d7c29c] transition-colors"
+            >
+              Portfolio
+            </a>
+            <a
+              href="https://github.com/rkohnmn/fairs-bitcamp"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded border border-white/10 bg-white/5 hover:bg-white/10 text-[#d7c29c] transition-colors"
+            >
+              <span>GitHub</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           </div>
         </div>
         {isMenuOpen && (

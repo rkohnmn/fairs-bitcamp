@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="frontend/public/Fairs.png" alt="FAIRS logo" width="200" />
 
@@ -8,6 +8,7 @@
 
 Built at [Bitcamp](https://bit.camp/) 2026 · University of Maryland
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-brightgreen?logo=githubpages&logoColor=white)](https://rkohnmn.github.io/fairs-bitcamp/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776ab?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=black)](https://react.dev)
